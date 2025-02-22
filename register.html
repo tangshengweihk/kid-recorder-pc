@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>人脸注册</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <script src="node_modules/face-api.js/dist/face-api.min.js"></script>
+    <!-- Bootstrap Pulse Theme -->
+    <link rel="stylesheet" href="https://bootswatch.com/5/pulse/bootstrap.min.css">
+    <style>
+        body {
+            background-color: #f8f9fa;
+            min-height: 100vh;
+            padding: 2rem 0;
+        }
+        .card {
+            border: none;
+            border-radius: 1rem;
+            box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15);
+        }
+        .card-header {
+            background: linear-gradient(45deg, #593196, #6f42c1);
+            color: white;
+            border-bottom: none;
+            padding: 1.5rem;
+            text-align: center;
+            border-radius: 1rem 1rem 0 0 !important;
+        }
+        .card-header h1 {
+            color: white;
+            margin: 0;
+            font-weight: 600;
+        }
+        .video-container {
+            position: relative;
+            padding: 1rem;
+            background: #fff;
+            border-radius: 0.5rem;
+            margin: 1rem 0;
+        }
+        #videoElement {
+            width: 100%;
+            max-width: 500px;
+            border-radius: 0.5rem;
+            margin: 0 auto;
+            display: block;
+        }
+        .overlay-container {
+            position: relative;
+            width: 100%;
+            max-width: 500px;
+            margin: 0 auto;
+        }
+        #overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+        #status {
+            margin: 1rem 0;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            text-align: center;
+            display: none;
+        }
+        .success {
+            background-color: #17b06b;
+            color: white;
+        }
+        .error {
+            background-color: #dc3545;
+            color: white;
+        }
+        .form-floating {
+            margin-bottom: 1rem;
+        }
+        .form-control:focus {
+            border-color: #593196;
+            box-shadow: 0 0 0 0.25rem rgba(89, 49, 150, 0.25);
+        }
+        .btn-group {
+            margin-top: 1.5rem;
+            display: flex;
+            gap: 1rem;
+            justify-content: center;
+        }
+        .btn {
+            padding: 0.75rem 2rem;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            transition: all 0.3s ease;
+        }
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15);
+        }
+        .detection-box {
+            position: absolute;
+            border: 3px solid #593196;
+            border-radius: 4px;
+            background-color: rgba(89, 49, 150, 0.1);
+        }
+        #detectionStatus {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: linear-gradient(45deg, #593196, #6f42c1);
+            color: white;
+            padding: 8px 12px;
+            border-radius: 4px;
+            font-size: 14px;
+            z-index: 100;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+        .blink {
+            animation: blink 1s infinite;
+            color: #fff;
+        }
+        @keyframes blink {
+            50% { opacity: 0.5; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="row justify-content-center">
+            <div class="col-md-8">
+                <div class="card">
+                    <div class="card-header">
+                        <h1>人脸注册</h1>
+                    </div>
+                    <div class="card-body">
+                        <div id="status" style="display: none;"></div>
+                        <div class="video-container">
+                            <div class="overlay-container">
+                                <div id="detectionStatus">
+                                    <span class="blink">●</span> 正在检测中...
+                                </div>
+                                <video id="videoElement" autoplay class="shadow-sm"></video>
+                                <canvas id="overlay"></canvas>
+                            </div>
+                        </div>
+                        <div class="form-floating mb-3">
+                            <input type="text" class="form-control" id="username" placeholder="请输入用户名">
+                            <label for="username">用户名</label>
+                        </div>
+                        <div class="btn-group">
+                            <button class="btn btn-primary" onclick="startRegister()">
+                                <i class="fas fa-user-plus"></i> 注册人脸
+                            </button>
+                            <button class="btn btn-outline-secondary" onclick="window.location.href='login.html'">
+                                <i class="fas fa-arrow-left"></i> 返回登录
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bootstrap Bundle with Popper -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- Font Awesome -->
+    <script src="https://kit.fontawesome.com/your-font-awesome-kit.js" crossorigin="anonymous"></script>
+
+    <script>
+        let isProcessing = false;
+        let isDetecting = false;
+        let detectionCount = 0;
+
+        // 初始化face-api.js
+        async function initFaceAPI() {
+            await Promise.all([
+                faceapi.nets.ssdMobilenetv1.loadFromUri('/weights'),
+                faceapi.nets.faceLandmark68Net.loadFromUri('/weights'),
+                faceapi.nets.faceRecognitionNet.loadFromUri('/weights')
+            ]);
+        }
+
+        // 启动视频流
+        async function startVideo() {
+            const video = document.getElementById('videoElement');
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                video.srcObject = stream;
+            } catch (err) {
+                console.error("无法访问摄像头:", err);
+                showStatus("无法访问摄像头，请检查权限设置", "error");
+            }
+        }
+
+        // 显示状态信息
+        function showStatus(message, type = "success") {
+            const status = document.getElementById("status");
+            status.textContent = message;
+            status.className = type;
+            status.style.display = 'block';
+        }
+
+        // 实时人脸检测
+        async function startRealTimeDetection() {
+            const video = document.getElementById('videoElement');
+            const canvas = document.getElementById('overlay');
+            const displaySize = { width: video.width, height: video.height };
+            faceapi.matchDimensions(canvas, displaySize);
+            const detectionStatus = document.getElementById('detectionStatus');
+
+            isDetecting = true;
+
+            async function detect() {
+                if (!isDetecting) {
+                    detectionStatus.style.display = 'none';
+                    return;
+                }
+
+                try {
+                    const detections = await faceapi.detectAllFaces(video, new faceapi.SsdMobilenetv1Options())
+                        .withFaceLandmarks();
+
+                    if (detections && detections.length > 0) {
+                        detectionStatus.style.display = 'block';
+
+                        const resizedDetections = faceapi.resizeResults(detections, displaySize);
+                        canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+                        faceapi.draw.drawDetections(canvas, resizedDetections);
+                        faceapi.draw.drawFaceLandmarks(canvas, resizedDetections);
+                    }
+
+                    if (isDetecting) {
+                        setTimeout(() => detect(), 100);
+                    }
+                } catch (err) {
+                    console.error('检测错误:', err);
+                    if (isDetecting) {
+                        setTimeout(() => detect(), 100);
+                    }
+                }
+            }
+            detect();
+        }
+
+        // 注册人脸
+        async function startRegister() {
+            if (isProcessing) return;
+            isProcessing = true;
+
+            const username = document.getElementById("username").value;
+            if (!username) {
+                showStatus("请输入用户名", "error");
+                isProcessing = false;
+                return;
+            }
+
+            // 检查用户名是否已存在
+            try {
+                const checkResponse = await fetch(`/api/users/check/${encodeURIComponent(username)}`);
+                if (!checkResponse.ok) {
+                    throw new Error('检查用户名失败');
+                }
+                const checkResult = await checkResponse.json();
+                if (checkResult.exists) {
+                    showStatus("用户名已存在，请更换其他用户名", "error");
+                    isProcessing = false;
+                    return;
+                }
+            } catch (err) {
+                console.error("检查用户名失败:", err);
+                showStatus("检查用户名失败，请重试", "error");
+                isProcessing = false;
+                return;
+            }
+
+            // 开始检测
+            isDetecting = true;
+            document.getElementById('detectionStatus').style.display = 'block';
+            startRealTimeDetection();
+
+            showStatus("正在处理...");
+            const video = document.getElementById("videoElement");
+            
+            try {
+                // 使用更详细的人脸检测参数
+                const detection = await faceapi.detectSingleFace(video, new faceapi.SsdMobilenetv1Options({ 
+                    minConfidence: 0.9  // 提高人脸检测的置信度阈值
+                }))
+                .withFaceLandmarks()
+                .withFaceDescriptor();
+
+                if (detection) {
+                    // 检查人脸是否正对摄像头
+                    const landmarks = detection.landmarks;
+                    const leftEye = landmarks.getLeftEye();
+                    const rightEye = landmarks.getRightEye();
+                    const nose = landmarks.getNose();
+                    
+                    // 计算眼睛之间的距离（用于判断人脸大小）
+                    const eyeDistance = Math.sqrt(
+                        Math.pow(leftEye[0].x - rightEye[0].x, 2) + 
+                        Math.pow(leftEye[0].y - rightEye[0].y, 2)
+                    );
+
+                    // 计算鼻子到眼睛中点的垂直距离（用于判断人脸角度）
+                    const eyeMidPointY = (leftEye[0].y + rightEye[0].y) / 2;
+                    const noseToEyeDistance = Math.abs(nose[0].y - eyeMidPointY);
+
+                    // 设置质量检查阈值
+                    if (eyeDistance < 50) {
+                        showStatus("请靠近一点摄像头", "error");
+                        isProcessing = false;
+                        return;
+                    }
+
+                    if (eyeDistance > 150) {
+                        showStatus("请离远一点摄像头", "error");
+                        isProcessing = false;
+                        return;
+                    }
+
+                    // 检查人脸是否倾斜
+                    const eyeSlope = Math.abs(leftEye[0].y - rightEye[0].y);
+                    if (eyeSlope > 10) {
+                        showStatus("请保持头部水平", "error");
+                        isProcessing = false;
+                        return;
+                    }
+
+                    // 保存到服务器
+                    const response = await fetch('/api/users', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            username,
+                            faceDescriptor: Array.from(detection.descriptor)
+                        })
+                    });
+
+                    if (!response.ok) {
+                        const errorData = await response.json();
+                        throw new Error(errorData.error || '保存失败');
+                    }
+
+                    showStatus(`用户 ${username} 注册成功！`);
+                    // 停止检测
+                    isDetecting = false;
+                    document.getElementById('detectionStatus').style.display = 'none';
+                    // 清除画布
+                    const canvas = document.getElementById('overlay');
+                    canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+                    setTimeout(() => {
+                        window.location.href = 'login.html';
+                    }, 2000);
+                } else {
+                    showStatus("未检测到人脸，请确保人脸在画面中且光线充足", "error");
+                }
+            } catch (err) {
+                console.error("注册失败:", err);
+                showStatus(err.message || "注册失败，请重试", "error");
+            }
+
+            if (!isDetecting) {
+                document.getElementById('detectionStatus').style.display = 'none';
+                // 清除画布
+                const canvas = document.getElementById('overlay');
+                canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+            }
+
+            isProcessing = false;
+        }
+
+        // 页面加载完成后初始化
+        window.addEventListener('load', async () => {
+            try {
+                await initFaceAPI();
+                await startVideo();
+                // 隐藏检测状态
+                document.getElementById('detectionStatus').style.display = 'none';
+                showStatus("请输入用户名并确保人脸在画面中");
+            } catch (err) {
+                console.error("初始化失败:", err);
+                showStatus("初始化失败，请刷新页面重试", "error");
+            }
+        });
+    </script>
+</body>
+</html> 

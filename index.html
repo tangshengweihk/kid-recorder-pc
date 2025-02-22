@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>个人主页</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <script src="node_modules/html5-qrcode/html5-qrcode.min.js"></script>
+    <!-- Bootstrap Pulse Theme -->
+    <link rel="stylesheet" href="https://bootswatch.com/5/pulse/bootstrap.min.css">
+    <style>
+        body {
+            background-color: #f8f9fa;
+            min-height: 100vh;
+            padding: 2rem 0;
+        }
+        .card {
+            border: none;
+            border-radius: 1rem;
+            box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15);
+            margin-bottom: 2rem;
+        }
+        .header-card {
+            background: linear-gradient(45deg, #593196, #6f42c1);
+            color: white;
+        }
+        .avatar {
+            width: 64px;
+            height: 64px;
+            border-radius: 50%;
+            background-color: rgba(255, 255, 255, 0.2);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            color: white;
+            margin-right: 1rem;
+        }
+        .welcome-message {
+            font-size: 1.5rem;
+            margin: 0;
+        }
+        .username {
+            opacity: 0.8;
+            margin: 0;
+        }
+        .stat-card {
+            text-align: center;
+            padding: 1.5rem;
+            transition: transform 0.3s;
+        }
+        .stat-card:hover {
+            transform: translateY(-5px);
+        }
+        .stat-number {
+            font-size: 2.5rem;
+            font-weight: bold;
+            color: #593196;
+            margin: 0.5rem 0;
+        }
+        .stat-label {
+            color: #6c757d;
+            font-size: 1rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        #qr-reader {
+            width: 100%;
+            margin: 1rem 0;
+            display: none;
+        }
+        .device-info {
+            display: none;
+        }
+        .toast-container {
+            position: fixed;
+            top: 1rem;
+            right: 1rem;
+            z-index: 1050;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- 顶部卡片 -->
+        <div class="card header-card mb-4">
+            <div class="card-body d-flex justify-content-between align-items-center">
+                <div class="d-flex align-items-center">
+                    <div class="avatar" id="userAvatar"></div>
+                    <div>
+                        <h4 class="welcome-message">欢迎回来！</h4>
+                        <p class="username" id="username"></p>
+                    </div>
+                </div>
+                <button class="btn btn-outline-light" onclick="logout()">
+                    <i class="fas fa-sign-out-alt"></i> 退出登录
+                </button>
+            </div>
+        </div>
+
+        <!-- 统计卡片 -->
+        <div class="row mb-4">
+            <div class="col-md-4">
+                <div class="card stat-card">
+                    <div class="stat-number" id="loginCount">0</div>
+                    <div class="stat-label">登录次数</div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card stat-card">
+                    <div class="stat-number" id="activeCount">0</div>
+                    <div class="stat-label">活跃天数</div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card stat-card">
+                    <div class="stat-number" id="successRate">99%</div>
+                    <div class="stat-label">识别准确率</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 设备登记卡片 -->
+        <div class="card mb-4">
+            <div class="card-header bg-white">
+                <h5 class="card-title mb-0">设备登记</h5>
+            </div>
+            <div class="card-body">
+                <button class="btn btn-primary w-100 mb-3" onclick="startScanning()">
+                    <i class="fas fa-qrcode"></i> 扫描二维码
+                </button>
+                <div id="qr-reader"></div>
+                <div class="device-info" id="deviceInfo">
+                    <h5 class="mb-3">扫描结果：</h5>
+                    <div class="mb-3">
+                        <label class="form-label">设备名称：</label>
+                        <input type="text" class="form-control" id="deviceName" readonly>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">序列号：</label>
+                        <input type="text" class="form-control" id="serialNumber" readonly>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">使用人姓名：</label>
+                        <input type="text" class="form-control" id="userName" readonly>
+                    </div>
+                    <button class="btn btn-success w-100" id="submitButton" onclick="submitDevice()">
+                        <i class="fas fa-check"></i> 提交
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast 消息容器 -->
+    <div class="toast-container"></div>
+
+    <!-- Bootstrap Bundle with Popper -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- Font Awesome -->
+    <script src="https://kit.fontawesome.com/your-font-awesome-kit.js" crossorigin="anonymous"></script>
+
+    <script>
+        let html5QrcodeScanner = null;
+        const DEVICE_API_URL = 'http://localhost:3000';
+
+        // 检查登录状态并获取用户信息
+        window.addEventListener('load', async () => {
+            const currentUser = localStorage.getItem('currentUser');
+            if (!currentUser) {
+                window.location.href = 'login.html';
+                return;
+            }
+
+            // 显示用户信息
+            document.getElementById('username').textContent = currentUser;
+            document.getElementById('userAvatar').textContent = currentUser.charAt(0).toUpperCase();
+            document.getElementById('userName').value = currentUser;
+
+            // 加载用户统计信息
+            await loadUserStats(currentUser);
+        });
+
+        // 加载用户统计信息
+        async function loadUserStats(username) {
+            try {
+                const response = await fetch(`/api/users/${username}/stats`);
+                if (response.ok) {
+                    const stats = await response.json();
+                    document.getElementById('loginCount').textContent = stats.loginCount || 0;
+                    
+                    // 计算活跃天数（注册到现在的天数）
+                    const registerDate = new Date(stats.registerTime);
+                    const now = new Date();
+                    const activeDays = Math.ceil((now - registerDate) / (1000 * 60 * 60 * 24));
+                    document.getElementById('activeCount').textContent = activeDays;
+                }
+            } catch (err) {
+                console.error('加载用户统计信息失败:', err);
+            }
+        }
+
+        // 开始扫描
+        function startScanning() {
+            const qrReader = document.getElementById('qr-reader');
+            qrReader.style.display = 'block';
+            
+            if (html5QrcodeScanner === null) {
+                const html5Qrcode = new Html5Qrcode("qr-reader");
+                html5Qrcode.start(
+                    { facingMode: "environment" },
+                    {
+                        fps: 10,
+                        qrbox: { width: 250, height: 250 }
+                    },
+                    onScanSuccess,
+                    onScanFailure
+                );
+                html5QrcodeScanner = html5Qrcode;
+            }
+        }
+
+        // 扫描成功回调
+        function onScanSuccess(decodedText, decodedResult) {
+            try {
+                const qrData = JSON.parse(decodedText);
+                document.getElementById('deviceName').value = qrData.device_name;
+                document.getElementById('serialNumber').value = qrData.serial_number;
+                
+                // 显示设备信息和提交按钮
+                document.getElementById('deviceInfo').style.display = 'block';
+                document.getElementById('submitButton').style.display = 'block';
+                
+                // 停止扫描
+                if (html5QrcodeScanner) {
+                    html5QrcodeScanner.stop();
+                    document.getElementById('qr-reader').style.display = 'none';
+                }
+
+                showMessage('二维码扫描成功！', 'success');
+            } catch (err) {
+                console.error('二维码解析失败:', err);
+                showMessage('二维码格式不正确，请重试', 'error');
+            }
+        }
+
+        // 扫描失败回调
+        function onScanFailure(error) {
+            // console.warn(`二维码扫描失败: ${error}`);
+        }
+
+        // 提交设备信息
+        async function submitDevice() {
+            const deviceName = document.getElementById('deviceName').value;
+            const serialNumber = document.getElementById('serialNumber').value;
+            const userName = document.getElementById('userName').value;
+
+            if (!deviceName || !serialNumber) {
+                showMessage('请先扫描设备二维码', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${DEVICE_API_URL}/api/devices/quick?device_name=${encodeURIComponent(deviceName)}&serial_number=${encodeURIComponent(serialNumber)}&user_name=${encodeURIComponent(userName)}`, {
+                    method: 'GET'
+                });
+
+                const data = await response.json();
+                showMessage(data, 'success');
+                // 重置表单
+                document.getElementById('deviceInfo').style.display = 'none';
+                document.getElementById('submitButton').style.display = 'none';
+                document.getElementById('deviceName').value = '';
+                document.getElementById('serialNumber').value = '';
+            } catch (err) {
+                console.error('提交失败:', err);
+                showMessage('提交失败，请检查网络连接', 'error');
+            }
+        }
+
+        // 显示消息提示
+        function showMessage(message, type) {
+            const toastContainer = document.querySelector('.toast-container');
+            const toastHtml = `
+                <div class="toast align-items-center text-white bg-${type === 'success' ? 'success' : 'danger'} border-0" role="alert" aria-live="assertive" aria-atomic="true">
+                    <div class="d-flex">
+                        <div class="toast-body">
+                            ${message}
+                        </div>
+                        <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+                    </div>
+                </div>
+            `;
+            toastContainer.insertAdjacentHTML('beforeend', toastHtml);
+            const toast = new bootstrap.Toast(toastContainer.lastElementChild);
+            toast.show();
+            
+            // 3秒后自动移除
+            setTimeout(() => {
+                toastContainer.lastElementChild.remove();
+            }, 3000);
+        }
+
+        // 退出登录
+        function logout() {
+            localStorage.removeItem('currentUser');
+            window.location.href = 'login.html';
+        }
+    </script>
+</body>
+</html> 
