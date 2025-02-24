@@ -1,7 +1,12 @@
-const { join } = require('path')
-const { Low } = require('lowdb')
-const { JSONFile } = require('lowdb/node')
-const fs = require('fs')
+import { join } from 'path'
+import { Low } from 'lowdb'
+import { JSONFile } from 'lowdb/node'
+import { fileURLToPath } from 'url'
+import { dirname } from 'path'
+import fs from 'fs'
+
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = dirname(__filename)
 
 // 数据库文件路径
 const dbFile = join(__dirname, 'face_db.json')
@@ -116,7 +121,7 @@ initDB().catch(err => {
     process.exit(1)
 })
 
-module.exports = {
+export {
     saveUser,
     getAllFaceData,
     updateLoginInfo,

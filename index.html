@@ -6,6 +6,8 @@
     <script src="node_modules/html5-qrcode/html5-qrcode.min.js"></script>
     <!-- Bootstrap Pulse Theme -->
     <link rel="stylesheet" href="https://bootswatch.com/5/pulse/bootstrap.min.css">
+    <!-- 使用Font Awesome CDN -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
         body {
             background-color: #f8f9fa;
@@ -155,12 +157,10 @@
 
     <!-- Bootstrap Bundle with Popper -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
-    <!-- Font Awesome -->
-    <script src="https://kit.fontawesome.com/your-font-awesome-kit.js" crossorigin="anonymous"></script>
 
     <script>
         let html5QrcodeScanner = null;
-        const DEVICE_API_URL = 'http://localhost:3000';
+        const DEVICE_API_URL = '/proxy/api/devices/quick';  // 改用完整的代理路由路径
 
         // 检查登录状态并获取用户信息
         window.addEventListener('load', async () => {
@@ -203,19 +203,40 @@
             const qrReader = document.getElementById('qr-reader');
             qrReader.style.display = 'block';
             
-            if (html5QrcodeScanner === null) {
-                const html5Qrcode = new Html5Qrcode("qr-reader");
-                html5Qrcode.start(
-                    { facingMode: "environment" },
-                    {
-                        fps: 10,
-                        qrbox: { width: 250, height: 250 }
-                    },
-                    onScanSuccess,
-                    onScanFailure
-                );
-                html5QrcodeScanner = html5Qrcode;
+            // 如果扫描器存在，先停止它
+            if (html5QrcodeScanner) {
+                html5QrcodeScanner.stop().then(() => {
+                    html5QrcodeScanner = null;
+                    // 清理旧的扫描器DOM
+                    qrReader.innerHTML = '';
+                    startNewScanner();
+                }).catch(() => {
+                    // 如果停止失败，也要清理
+                    html5QrcodeScanner = null;
+                    qrReader.innerHTML = '';
+                    startNewScanner();
+                });
+            } else {
+                startNewScanner();
             }
+        }
+
+        // 启动新的扫描器
+        function startNewScanner() {
+            const html5Qrcode = new Html5Qrcode("qr-reader");
+            html5QrcodeScanner = html5Qrcode;
+            
+            html5Qrcode.start(
+                { facingMode: "environment" },
+                {
+                    fps: 10
+                },
+                onScanSuccess,
+                onScanFailure
+            ).catch(error => {
+                console.error("启动扫描器失败:", error);
+                showMessage("启动摄像头失败，请检查摄像头权限", "error");
+            });
         }
 
         // 扫描成功回调
@@ -231,8 +252,15 @@
                 
                 // 停止扫描
                 if (html5QrcodeScanner) {
-                    html5QrcodeScanner.stop();
-                    document.getElementById('qr-reader').style.display = 'none';
+                    html5QrcodeScanner.stop().then(() => {
+                        document.getElementById('qr-reader').style.display = 'none';
+                        document.getElementById('qr-reader').innerHTML = '';
+                        html5QrcodeScanner = null;
+                    }).catch(() => {
+                        document.getElementById('qr-reader').style.display = 'none';
+                        document.getElementById('qr-reader').innerHTML = '';
+                        html5QrcodeScanner = null;
+                    });
                 }
 
                 showMessage('二维码扫描成功！', 'success');
@@ -258,45 +286,144 @@
                 return;
             }
 
+            const url = `${DEVICE_API_URL}?device_name=${encodeURIComponent(deviceName)}&serial_number=${encodeURIComponent(serialNumber)}&user_name=${encodeURIComponent(userName)}`;
+            
             try {
-                const response = await fetch(`${DEVICE_API_URL}/api/devices/quick?device_name=${encodeURIComponent(deviceName)}&serial_number=${encodeURIComponent(serialNumber)}&user_name=${encodeURIComponent(userName)}`, {
-                    method: 'GET'
+                // 发送请求并等待响应
+                const response = await fetch(url, {
+                    method: 'GET',
+                    mode: 'cors',
+                    headers: {
+                        'Accept': 'application/json'
+                    }
                 });
 
-                const data = await response.json();
-                showMessage(data, 'success');
-                // 重置表单
-                document.getElementById('deviceInfo').style.display = 'none';
-                document.getElementById('submitButton').style.display = 'none';
-                document.getElementById('deviceName').value = '';
-                document.getElementById('serialNumber').value = '';
+                // 尝试解析响应
+                let data;
+                try {
+                    data = await response.json();
+                } catch (e) {
+                    // 如果不是JSON，尝试获取文本
+                    const text = await response.text();
+                    data = { message: text };
+                }
+
+                if (response.ok) {
+                    // 检查是否是"设备正在使用中"的消息
+                    if (data.message && data.message.includes('设备正在使用中')) {
+                        showMessage({
+                            title: `✖ ${data.message}`,
+                            设备名称: deviceName,
+                            序列号: serialNumber,
+                            使用人: userName
+                        }, 'error');
+                    } else {
+                        // 显示成功消息
+                        showMessage({
+                            title: `✅ ${data.message || '设备登记成功'}`,
+                            设备名称: deviceName,
+                            序列号: serialNumber,
+                            使用人: userName,
+                            提交时间: new Date().toLocaleString()
+                        }, 'success');
+                    }
+
+                    // 重置表单和UI
+                    document.getElementById('qr-reader').style.display = 'none';
+                    document.getElementById('deviceInfo').style.display = 'none';
+                    document.getElementById('submitButton').style.display = 'none';
+                    document.getElementById('deviceName').value = '';
+                    document.getElementById('serialNumber').value = '';
+
+                    // 停止扫描器（如果存在）
+                    if (html5QrcodeScanner) {
+                        html5QrcodeScanner.stop().catch(() => {});
+                        html5QrcodeScanner = null;
+                    }
+                } else {
+                    // 显示错误消息
+                    showMessage({
+                        title: `❌ ${data.message || data.error || '设备登记失败'}`.replace('❌', '✖'),
+                        设备名称: deviceName,
+                        序列号: serialNumber,
+                        使用人: userName
+                    }, 'error');
+                }
             } catch (err) {
                 console.error('提交失败:', err);
-                showMessage('提交失败，请检查网络连接', 'error');
+                showMessage({
+                    title: '✖ 提交失败',
+                    错误信息: '网络连接错误，请重试',
+                    设备名称: deviceName,
+                    序列号: serialNumber,
+                    使用人: userName
+                }, 'error');
             }
         }
 
         // 显示消息提示
         function showMessage(message, type) {
             const toastContainer = document.querySelector('.toast-container');
+            let messageText = '';
+            
+            // 如果message是对象，将其转换为格式化的文本
+            if (typeof message === 'object') {
+                const { title, ...rest } = message;
+                messageText = `<div style="font-size: 18px; font-weight: bold; margin-bottom: 8px;">${title || ''}</div>${Object.entries(rest)
+                    .map(([key, value]) => `${key}：${value}`)
+                    .join('\n')}`;
+            } else {
+                messageText = `<div style="font-size: 18px; font-weight: bold;">${message}</div>`;
+            }
+            
             const toastHtml = `
-                <div class="toast align-items-center text-white bg-${type === 'success' ? 'success' : 'danger'} border-0" role="alert" aria-live="assertive" aria-atomic="true">
-                    <div class="d-flex">
-                        <div class="toast-body">
-                            ${message}
+                <div class="message-toast ${type === 'success' ? 'success' : 'error'}" 
+                     role="alert" 
+                     style="
+                        position: relative;
+                        min-width: 350px;
+                        margin-bottom: 1rem;
+                        padding: 1rem;
+                        background: ${type === 'success' ? '#198754' : '#dc3545'};
+                        color: white;
+                        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+                        border-radius: 8px;
+                        opacity: 0;
+                        transition: opacity 0.3s ease-in-out;
+                     ">
+                    <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                        <div style="white-space: pre-wrap; font-family: system-ui; font-size: 14px; line-height: 1.5;">
+                            ${messageText}
                         </div>
-                        <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+                        <button type="button" 
+                                style="
+                                    background: transparent;
+                                    border: none;
+                                    color: white;
+                                    font-size: 24px;
+                                    line-height: 1;
+                                    padding: 0 0 0 1rem;
+                                    cursor: pointer;
+                                "
+                                onclick="this.parentElement.parentElement.remove();">
+                            ×
+                        </button>
                     </div>
                 </div>
             `;
-            toastContainer.insertAdjacentHTML('beforeend', toastHtml);
-            const toast = new bootstrap.Toast(toastContainer.lastElementChild);
-            toast.show();
             
-            // 3秒后自动移除
+            toastContainer.insertAdjacentHTML('beforeend', toastHtml);
+            const toast = toastContainer.lastElementChild;
+            
+            // 强制重绘以触发过渡动画
+            toast.offsetHeight;
+            toast.style.opacity = '1';
+            
+            // 8秒后自动移除
             setTimeout(() => {
-                toastContainer.lastElementChild.remove();
-            }, 3000);
+                toast.style.opacity = '0';
+                setTimeout(() => toast.remove(), 300);
+            }, 8000);
         }
 
         // 退出登录
@@ -306,4 +433,4 @@
         }
     </script>
 </body>
-</html> 
+</html>

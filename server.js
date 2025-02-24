@@ -1,12 +1,59 @@
-const express = require('express');
-const cors = require('cors');
-const { saveUser, getAllFaceData, updateLoginInfo, getUserStats, isUserExists } = require('./db');
+import express from 'express';
+import cors from 'cors';
+import fetch from 'node-fetch';
+import { saveUser, getAllFaceData, updateLoginInfo, getUserStats, isUserExists } from './db.js';
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 // 添加静态文件服务
 app.use(express.static('.'));
+
+// 代理路由
+app.use('/proxy', async (req, res) => {
+    try {
+        const targetUrl = `http://localhost:3000${req.url}`;
+        console.log('代理请求到:', targetUrl);
+        
+        const response = await fetch(targetUrl);
+        const text = await response.text();
+        
+        // 设置与原始响应相同的状态码
+        res.status(response.status);
+        
+        // 设置响应头
+        res.setHeader('Content-Type', response.headers.get('content-type') || 'application/json');
+        
+        // 发送响应
+        res.send(text);
+    } catch (error) {
+        console.error('代理请求失败:', error);
+        res.status(500).json({ error: '代理请求失败' });
+    }
+});
+
+// 代理路由
+app.use('/proxy/api/devices/quick', async (req, res) => {
+    try {
+        const targetUrl = `http://localhost:3000/api/devices/quick${req.url.includes('?') ? req.url : ''}`;
+        console.log('代理请求到:', targetUrl);
+        
+        const response = await fetch(targetUrl);
+        const text = await response.text();
+        
+        // 设置与原始响应相同的状态码
+        res.status(response.status);
+        
+        // 设置响应头
+        res.setHeader('Content-Type', response.headers.get('content-type') || 'application/json');
+        
+        // 发送响应
+        res.send(text);
+    } catch (error) {
+        console.error('代理请求失败:', error);
+        res.status(500).json({ error: '代理请求失败' });
+    }
+});
 
 // 检查用户名是否存在
 app.get('/api/users/check/:username', async (req, res) => {
@@ -75,6 +122,34 @@ app.get('/api/users/:username/stats', async (req, res) => {
     } catch (error) {
         console.error('获取用户统计信息失败:', error);
         res.status(500).json({ error: '获取用户统计信息失败' });
+    }
+});
+
+// 设备快速登记
+app.get('/api/devices/quick', async (req, res) => {
+    try {
+        const { device_name, serial_number, user_name } = req.query;
+        
+        if (!device_name || !serial_number || !user_name) {
+            return res.status(400).json({ error: '缺少必要参数' });
+        }
+
+        // 这里可以添加设备登记的业务逻辑
+        // 例如：保存到数据库、更新设备状态等
+        
+        // 返回成功消息
+        res.json({
+            message: '设备登记成功',
+            data: {
+                device_name,
+                serial_number,
+                user_name,
+                register_time: new Date().toISOString()
+            }
+        });
+    } catch (error) {
+        console.error('设备登记失败:', error);
+        res.status(500).json({ error: '设备登记失败' });
     }
 });
 

@@ -2,6 +2,7 @@
   "name": "face-api-app",
   "version": "1.0.0",
   "description": "Face detection and recognition application using face-api.js",
+  "type": "module",
   "scripts": {
     "start": "node server.js"
   },
@@ -10,7 +11,8 @@
     "express": "^4.17.1",
     "face-api.js": "^0.22.2",
     "html5-qrcode": "^2.3.8",
-    "lowdb": "^5.1.0"
+    "lowdb": "^5.1.0",
+    "node-fetch": "^3.3.2"
   },
   "devDependencies": {
     "http-server": "^14.1.1"
